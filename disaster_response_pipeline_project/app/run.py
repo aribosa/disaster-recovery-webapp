@@ -5,11 +5,14 @@ import pandas as pd
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
+import joblib
 from flask import Flask
 from flask import render_template, request, jsonify
 from plotly.graph_objs import Bar
-from sklearn.externals import joblib
 from sqlalchemy import create_engine
+from sklearn.base import BaseEstimator, TransformerMixin
+from nltk.tokenize import sent_tokenize
+import nltk
 
 
 app = Flask(__name__)
@@ -25,12 +28,44 @@ def tokenize(text):
 
     return clean_tokens
 
+
+class LoggerTransformer(BaseEstimator, TransformerMixin):
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X:pd.DataFrame, y=None):
+        return X
+
+class StartingVerbTransformer(BaseEstimator, TransformerMixin):
+
+    @staticmethod
+    def start_verb(text):
+        try:
+            sentences = sent_tokenize(text)
+            for sentence in sentences:
+                pos_tags = nltk.pos_tag(tokenize(sentence))
+                f_word, f_tag = pos_tags[0]
+                if f_tag in ['VB', 'VBP'] or f_word == 'RT':
+                    return True
+        except:
+            return False
+        return False
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X_new = pd.DataFrame(pd.Series(X).apply(self.start_verb))
+        return X_new
+
+
+
 # load data
-engine = create_engine('sqlite:///../data/YourDatabaseName.db')
-df = pd.read_sql_table('YourTableName', engine)
+engine = create_engine('sqlite:///../data/DisasterResponse.db')
+df = pd.read_sql_table('database_messages', engine)
 
 # load model
-model = joblib.load("../models/your_model_name.pkl")
+model = joblib.load("../models/model.pkl")
 
 
 # index webpage displays cool visuals and receives user input text for model
@@ -81,7 +116,10 @@ def go():
     query = request.args.get('query', '') 
 
     # use model to predict classification for query
-    classification_labels = model.predict([query])[0]
+    print(query)
+    classification_labels = model.predict([query])
+    print(classification_labels)
+    classification_labels = classification_labels[0]
     classification_results = dict(zip(df.columns[4:], classification_labels))
 
     # This will render the go.html Please see that file. 

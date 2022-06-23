@@ -1,1 +1,4 @@
 /venv/
+/virtualenv/
+
+disaster_response_pipeline_project/models/model.pkl

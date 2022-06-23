@@ -16,15 +16,20 @@ Args:
 
 # NLP libraries
 import nltk
-# nltk.download('punkt')
-# nltk.download('punkt')
-# nltk.download('wordnet')
-# nltk.download('averaged_perceptron_tagger')
+nltk.download('punkt')
+nltk.download('punkt')
+nltk.download('wordnet')
+nltk.download('averaged_perceptron_tagger')
+nltk.download('omw-1.4')
+nltk.download('stopwords')
+
+
 from nltk.tokenize import sent_tokenize
 from nltk.corpus import stopwords
 
 # Data
 import pandas as pd
+import pickle
 import numpy as np
 from sqlalchemy import create_engine
 
@@ -45,7 +50,7 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from sklearn.model_selection import GridSearchCV
 
 
-def load_data(database_filepath, n_rows=10):
+def load_data(database_filepath):
     """
     Returns both target and feature vectors from the messages database
 
@@ -65,9 +70,9 @@ def load_data(database_filepath, n_rows=10):
 
     """
     engine = create_engine('sqlite:///'  + database_filepath)
-    data_frame = pd.read_sql(f'SELECT * FROM database_messages LIMIT {n_rows}', engine)
+    data_frame = pd.read_sql(f'SELECT * FROM database_messages', engine)
 
-    return data_frame['message'], data_frame.iloc[:, 3:]
+    return data_frame['message'], data_frame.iloc[:, 4:]
 
 
 def tokenize(text):
@@ -99,7 +104,10 @@ def tokenize(text):
     lem = nltk.stem.WordNetLemmatizer()
     clean_tokens = [lem.lemmatize(token).lower().strip() for token in tokens]
     clean_tokens = list(filter(lambda x: len(x) > 2, clean_tokens))  # Filter tokens with less than 2 characters
-    clean_tokens = [token for token in clean_tokens if token in stopwords.words('english')]
+    
+    # Discarded for performance issues
+    # clean_tokens = [token for token in clean_tokens if token in stopwords.words('english')]
+
     return clean_tokens
 
 
@@ -108,7 +116,6 @@ class LoggerTransformer(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X:pd.DataFrame, y=None):
-        print(f'Starting Model traning with an array of shape {X.shape}')
         return X
 
 
@@ -148,7 +155,7 @@ def build_model():
         ])),
         ('logging', LoggerTransformer()),
 
-        ('classification', MultiOutputClassifier(RandomForestClassifier()))
+        ('classification', MultiOutputClassifier(RandomForestClassifier(n_estimators=45, n_jobs=-1)))
     ])
 
     return pipeline
@@ -169,8 +176,12 @@ def evaluate_model(model, X_test, Y_test, category_names=None):
     return
 
 
-def save_model(model, model_filepath):
-    pass
+def save_model(model: Pipeline, model_filepath):
+    with open(model_filepath, 'wb') as file:
+        pickle.dump(model, file)
+    
+    print('Model Saved')
+    return True
 
 
 def main():
@@ -178,25 +189,25 @@ def main():
         database_filepath, model_filepath = sys.argv[1:]
         print('Loading data...\n    DATABASE: {}'.format(database_filepath))
 
-        for n in range(100, 50000, 10000):
-            start = datetime.datetime.now()
-            X, Y = load_data(database_filepath, n_rows=n)
-            X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
+        start = datetime.datetime.now()
 
-            print('Building model...')
-            model = build_model()
+        X, Y = load_data(database_filepath)
+        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
 
-            print('Training model...')
-            model.fit(X_train, Y_train)
+        print('Building model...')
+        model = build_model()
 
-            print('Evaluating model...')
-            evaluate_model(model, X_test, Y_test)
+        print('Training model...')
+        model.fit(X_train, Y_train)
 
-            print('Saving model...\n    MODEL: {}'.format(model_filepath))
-            # save_model(model, model_filepath)
+        print('Evaluating model...')
+        evaluate_model(model, X_test, Y_test)
 
-            print('Trained model saved!')
-            print(f'Total time using {n} rows: {datetime.datetime.now() - start}')
+        print('Saving model...\n    MODEL: {}'.format(model_filepath))
+        save_model(model, model_filepath)
+
+        print('Trained model saved!')
+        print(f'Total time using {n} rows: {datetime.datetime.now() - start}')
 
     else:
         print('Please provide the filepath of the disaster messages database '\

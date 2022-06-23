@@ -23,13 +23,10 @@ def clean_data(df):
         df_categories[col] = df_categories[col].str.split('-').str.get(1)
         df_categories[col] = df_categories[col].astype(int)
     df_categories['id'] = df['id']
+    
     df = pd.concat([df, df_categories], axis=1).drop('categories', axis=1).iloc[:, :-1].drop_duplicates()
-
-    for genre in df.genre.unique():
-        df[f'is_{genre}'] = (df['genre'] == genre).astype(int)
-
-    df.drop('genre', axis=1, inplace=True)
-
+    print(df.head())
+    
     return df
 
 
