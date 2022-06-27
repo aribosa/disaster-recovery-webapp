@@ -25,6 +25,7 @@ def clean_data(df):
     df_categories['id'] = df['id']
     
     df = pd.concat([df, df_categories], axis=1).drop('categories', axis=1).iloc[:, :-1].drop_duplicates()
+    df['related'] = df['related'].replace({2: 1})
     print(df.head())
     
     return df

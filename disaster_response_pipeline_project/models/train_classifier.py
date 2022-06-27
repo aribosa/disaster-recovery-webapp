@@ -50,6 +50,10 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from sklearn.model_selection import GridSearchCV
 
 
+URL_REGEX = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+NOT_WORD_REGEX = re.compile('[^A-Za-z0-9]')
+STOP_WORDS = stopwords.words('english')
+
 def load_data(database_filepath):
     """
     Returns both target and feature vectors from the messages database
@@ -90,37 +94,28 @@ def tokenize(text):
     """
 
     # Replace url hyperlinks with special place holders
-    url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-    urls = re.findall(url_regex, text)
+
+    urls = re.findall(URL_REGEX, text)
 
     # Crawl for each found URL and replace in the original text
     for url in urls:
         text = text.replace(url, 'url_placeholder')
 
     # Divide sentences into words (splitted by space)
-    tokens = nltk.word_tokenize(text)
+    tokens = nltk.word_tokenize(NOT_WORD_REGEX.sub(" ", text.lower()))
+    tokens = [t for t in tokens if t not in STOP_WORDS]
 
     # Lemmatize all the tokens to obtain the word's stem or root representation
     lem = nltk.stem.WordNetLemmatizer()
-    clean_tokens = [lem.lemmatize(token).lower().strip() for token in tokens]
-    clean_tokens = list(filter(lambda x: len(x) > 2, clean_tokens))  # Filter tokens with less than 2 characters
-    
-    # Discarded for performance issues
-    # clean_tokens = [token for token in clean_tokens if token in stopwords.words('english')]
+    clean_tokens = [lem.lemmatize(t) for t in tokens]
 
     return clean_tokens
 
 
-class LoggerTransformer(BaseEstimator, TransformerMixin):
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X:pd.DataFrame, y=None):
-        return X
-
-
 class StartingVerbTransformer(BaseEstimator, TransformerMixin):
-
+    """
+    Identifies wether the first word from the feature (message) contains a verb
+    """
     @staticmethod
     def start_verb(text):
         try:
@@ -143,6 +138,9 @@ class StartingVerbTransformer(BaseEstimator, TransformerMixin):
 
 
 def build_model():
+    """
+    Returns a Sklearn Pipeline to perform an end-to-end transformation and training.
+    """
     pipeline = Pipeline([
         ('features', FeatureUnion([
 
@@ -153,23 +151,26 @@ def build_model():
 
             ('sentence-tagger', StartingVerbTransformer())
         ])),
-        ('logging', LoggerTransformer()),
-
-        ('classification', MultiOutputClassifier(RandomForestClassifier(n_estimators=45, n_jobs=-1)))
+        
+        ('classification', MultiOutputClassifier(AdaBoostClassifier(n_estimators=200, learning_rate=0.3)))
     ])
 
     return pipeline
 
 
-def evaluate_model(model, X_test, Y_test, category_names=None):
+def evaluate_model(model, X_test, Y_test):
+    """
+    Gathers the accuracy score for each target label
+
+    Params:
+        model: sklearn transformer with predict method
+        X_test: feature vector
+        Y_test: target vector (real values)
+    """
     Y_prediction = model.predict(X_test)
     Y_pred = pd.DataFrame(Y_prediction, columns=Y_test.columns)
 
-    # conf_matrix = confusion_matrix(Y_test, Y_prediction)
-    # print('Confusion Matrix (Actual Values / Predicted')
-    # print(conf_matrix)
-
-
+    # Loop trough each column and test the model's accuracy
     for i, column in enumerate(Y_test.columns):
         print(f'Model performance over feature {column}: {accuracy_score(Y_test[column], Y_pred[column])}')
 
@@ -177,6 +178,7 @@ def evaluate_model(model, X_test, Y_test, category_names=None):
 
 
 def save_model(model: Pipeline, model_filepath):
+    # Save the model into a pickle file, allowing reusability
     with open(model_filepath, 'wb') as file:
         pickle.dump(model, file)
     
@@ -185,35 +187,34 @@ def save_model(model: Pipeline, model_filepath):
 
 
 def main():
-    if len(sys.argv) == 3:
-        database_filepath, model_filepath = sys.argv[1:]
-        print('Loading data...\n    DATABASE: {}'.format(database_filepath))
+    if not len(sys.argv) == 3:
+        print('No model and model file name provided, using defaults')
 
-        start = datetime.datetime.now()
+    database_filepath, model_filepath = sys.argv[1:] if len(sys.argv) > 1 else (None, None)
 
-        X, Y = load_data(database_filepath)
-        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
+    # If no values are provided, default values are used
+    database_filepath = database_filepath or '../data/DisasterResponse.db'
+    model_filepath = model_filepath or 'model.pkl'
 
-        print('Building model...')
-        model = build_model()
+    print('Loading data...\n    DATABASE: {}'.format(database_filepath))
 
-        print('Training model...')
-        model.fit(X_train, Y_train)
 
-        print('Evaluating model...')
-        evaluate_model(model, X_test, Y_test)
+    X, Y = load_data(database_filepath)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
 
-        print('Saving model...\n    MODEL: {}'.format(model_filepath))
-        save_model(model, model_filepath)
+    print('Building model...')
+    model = build_model()
 
-        print('Trained model saved!')
-        print(f'Total time using {n} rows: {datetime.datetime.now() - start}')
+    print('Training model...')
+    model.fit(X_train, Y_train)
 
-    else:
-        print('Please provide the filepath of the disaster messages database '\
-              'as the first argument and the filepath of the pickle file to '\
-              'save the model to as the second argument. \n\nExample: python '\
-              'train_classifier.py ../data/DisasterResponse.db classifier.pkl')
+    print('Evaluating model...')
+    evaluate_model(model, X_test, Y_test)
+
+    print('Saving model...\n    MODEL: {}'.format(model_filepath))
+    save_model(model, model_filepath)
+
+    print('Trained model saved!')
 
 
 if __name__ == '__main__':

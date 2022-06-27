@@ -1,40 +1,45 @@
+import re
+import sys
+import nltk
 import json
 import plotly
-import pandas as pd
-
-from nltk.stem import WordNetLemmatizer
-from nltk.tokenize import word_tokenize
-
 import joblib
+import pandas as pd
 from flask import Flask
-from flask import render_template, request, jsonify
 from plotly.graph_objs import Bar
+from plotly import express as px
+from nltk.corpus import stopwords
 from sqlalchemy import create_engine
-from sklearn.base import BaseEstimator, TransformerMixin
+from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import sent_tokenize
-import nltk
+from flask import render_template, request, jsonify
+from sklearn.base import BaseEstimator, TransformerMixin
 
+
+URL_REGEX = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+NOT_WORD_REGEX = re.compile('[^A-Za-z0-9]')
+STOP_WORDS = stopwords.words('english')
 
 app = Flask(__name__)
 
 def tokenize(text):
-    tokens = word_tokenize(text)
-    lemmatizer = WordNetLemmatizer()
+    # Replace url hyperlinks with special place holders
+    urls = re.findall(URL_REGEX, text)
 
-    clean_tokens = []
-    for tok in tokens:
-        clean_tok = lemmatizer.lemmatize(tok).lower().strip()
-        clean_tokens.append(clean_tok)
+    # Crawl for each found URL and replace in the original text
+    for url in urls:
+        text = text.replace(url, 'url_placeholder')
+
+    # Divide sentences into words (splitted by space)
+    tokens = nltk.word_tokenize(NOT_WORD_REGEX.sub(" ", text.lower()))
+    tokens = [t for t in tokens if t not in STOP_WORDS]
+
+    # Lemmatize all the tokens to obtain the word's stem or root representation
+    lem = nltk.stem.WordNetLemmatizer()
+    clean_tokens = [lem.lemmatize(t) for t in tokens]
 
     return clean_tokens
 
-
-class LoggerTransformer(BaseEstimator, TransformerMixin):
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X:pd.DataFrame, y=None):
-        return X
 
 class StartingVerbTransformer(BaseEstimator, TransformerMixin):
 
@@ -59,47 +64,44 @@ class StartingVerbTransformer(BaseEstimator, TransformerMixin):
         return X_new
 
 
-
-# load data
-engine = create_engine('sqlite:///../data/DisasterResponse.db')
-df = pd.read_sql_table('database_messages', engine)
-
-# load model
-model = joblib.load("../models/model.pkl")
-
-
-# index webpage displays cool visuals and receives user input text for model
+# Web App index page (metrics)
 @app.route('/')
 @app.route('/index')
 def index():
     
-    # extract data needed for visuals
-    # TODO: Below is an example - modify to extract data for your own visuals
-    genre_counts = df.groupby('genre').count()['message']
-    genre_names = list(genre_counts.index)
-    
-    # create visuals
-    # TODO: Below is an example - modify to create your own visuals
-    graphs = [
-        {
-            'data': [
-                Bar(
-                    x=genre_names,
-                    y=genre_counts
-                )
-            ],
+    # Group the messages database by genre and obtain the unbalance ratio
+    df_group = df.groupby('genre').size().to_frame('size').reset_index()
+    unbalance = pd.DataFrame(df.iloc[:, 4:].sum() / len(df), columns=['unbalance']).reset_index().sort_values('unbalance')
 
-            'layout': {
-                'title': 'Distribution of Message Genres',
-                'yaxis': {
-                    'title': "Count"
-                },
-                'xaxis': {
-                    'title': "Genre"
-                }
-            }
-        }
-    ]
+    # Bar Plot n1 - Count of messages by Genre
+    fig_1 = px.bar(
+        x=df_group['genre'],
+        y=df_group['size'],
+        text=[f'{_/1000:.1f} k' if _ > 1000 else _ for _ in df_group['size']],
+        color=df_group['genre'],
+        color_discrete_sequence= ['lightblue', 'lightgreen', 'blue']
+    )
+
+    fig_1.update_xaxes(title='Origin')
+    fig_1.update_yaxes(visible=False)
+    
+    # Bar Plot n2 - Unbalance ratio by genre
+    fig_2 = px.bar(
+        data_frame=unbalance,
+        x='unbalance',
+        y='index',
+        orientation='h',
+        height=800,
+        color=['1' if _ > 0.2 else '0' for _ in unbalance.unbalance],
+        color_discrete_map={'1': 'green', '0':'gray'}
+    )
+
+    fig_2.update_xaxes(title = 'Unbalance Ratio (higher is better)')
+    fig_2.update_yaxes(title = '')
+    fig_2.update_traces(showlegend=False)
+    fig_2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+
+    graphs = [fig_1, fig_2]
     
     # encode plotly graphs in JSON
     ids = ["graph-{}".format(i) for i, _ in enumerate(graphs)]
@@ -116,23 +118,46 @@ def go():
     query = request.args.get('query', '') 
 
     # use model to predict classification for query
-    print(query)
-    classification_labels = model.predict([query])
-    print(classification_labels)
+    tokens = tokenize(query)
+    classification_labels = model.predict([query])    
     classification_labels = classification_labels[0]
     classification_results = dict(zip(df.columns[4:], classification_labels))
 
-    # This will render the go.html Please see that file. 
+    # Render go.html jinja template with classification data 
     return render_template(
         'go.html',
         query=query,
+        tokens=tokens,
         classification_result=classification_results
     )
 
 
 def main():
-    app.run(host='0.0.0.0', port=3001, debug=True)
 
+    if len(sys.argv) >= 3:
+
+        database_path = sys.argv[1]
+        model_path = sys.argv[2]
+
+        with app.app_context() as ctx:
+            # Load data from Messages Database
+            engine = create_engine(f'sqlite:///{database_path}')
+            df = pd.read_sql_table('database_messages', engine)
+
+            # load model
+            model = joblib.load(f"{model_path}")
+
+            # Run application on port 3001
+        app.run(host='0.0.0.0', port=3001, debug=True)
+
+    else:
+        print("""
+##########
+Error: To execute the Disaste Recovery App please provide the database and model picke directory.
+Usage:
+        python run.py path_to_database path_to_pickle
+##########
+        """)
 
 if __name__ == '__main__':
     main()
