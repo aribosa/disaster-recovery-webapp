@@ -7,8 +7,8 @@ import pandas as pd
 
 
 def load_data(messages_filepath, categories_filepath):
-    disaster_categories = pd.read_csv('disaster_categories.csv')
-    disaster_messages = pd.read_csv('disaster_messages.csv')
+    disaster_categories = pd.read_csv(categories_filepath)
+    disaster_messages = pd.read_csv(messages_filepath)
 
     return pd.merge(disaster_messages, disaster_categories, on='id')
 

@@ -42,7 +42,7 @@ import pickle
 # ML models
 from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, ExtraTreesClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score, recall_score
 from sklearn.model_selection import train_test_split
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.multioutput import MultiOutputClassifier
@@ -158,7 +158,7 @@ def build_model():
     return pipeline
 
 
-def evaluate_model(model, X_test, Y_test):
+def evaluate_model(model, x_test, y_test):
     """
     Gathers the accuracy score for each target label
 
@@ -167,14 +167,24 @@ def evaluate_model(model, X_test, Y_test):
         X_test: feature vector
         Y_test: target vector (real values)
     """
-    Y_prediction = model.predict(X_test)
-    Y_pred = pd.DataFrame(Y_prediction, columns=Y_test.columns)
+    y_test = y_test.reset_index(drop=True)
+    preds = model.predict(x_test)
 
-    # Loop trough each column and test the model's accuracy
-    for i, column in enumerate(Y_test.columns):
-        print(f'Model performance over feature {column}: {accuracy_score(Y_test[column], Y_pred[column])}')
+    for index, column in enumerate(y_test.columns):
+        metrics = pd.DataFrame(columns=['f1_score', 'accuracy', 'recall'])
 
-    return
+        for val in [0, 1]:
+            true_values = y_test[y_test[column] == val][column].index.to_list()
+            predictions = preds[true_values, index]
+
+            f1 = f1_score(y_test.iloc[true_values, :][column], predictions)
+            accuracy = accuracy_score(y_test.iloc[true_values, :][column], predictions)
+            recall = recall_score(y_test.iloc[true_values, :][column], predictions)
+
+            metrics = metrics.append({'f1_score': f1, 'accuracy': accuracy, 'recall': recall}, ignore_index=True)
+
+        print(f'{column}   ===============')
+        print(metrics, end='\n\n')
 
 
 def save_model(model: Pipeline, model_filepath):
@@ -206,13 +216,18 @@ def main():
     model = build_model()
 
     print('Training model...')
-    model.fit(X_train, Y_train)
+    parameters = {
+        'classification__estimator__n_estimators': [10, 15, 25, 50, 100],
+        'classification__estimator__learning_rate': [0.1, 0.3, 0.5, 0.7]
+    }
+    model_cv = GridSearchCV(model, parameters, scoring='f1_weighted', verbose=10, error_score='raise')
+    model_cv.fit(X_train, Y_train)
 
     print('Evaluating model...')
-    evaluate_model(model, X_test, Y_test)
+    evaluate_model(model_cv, X_test, Y_test)
 
     print('Saving model...\n    MODEL: {}'.format(model_filepath))
-    save_model(model, model_filepath)
+    save_model(model_cv, model_filepath)
 
     print('Trained model saved!')
 

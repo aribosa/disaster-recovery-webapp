@@ -68,7 +68,7 @@ class StartingVerbTransformer(BaseEstimator, TransformerMixin):
 @app.route('/')
 @app.route('/index')
 def index():
-    
+    global df
     # Group the messages database by genre and obtain the unbalance ratio
     df_group = df.groupby('genre').size().to_frame('size').reset_index()
     unbalance = pd.DataFrame(df.iloc[:, 4:].sum() / len(df), columns=['unbalance']).reset_index().sort_values('unbalance')
@@ -114,6 +114,8 @@ def index():
 # web page that handles user query and displays model results
 @app.route('/go')
 def go():
+    global model
+
     # save user input in query
     query = request.args.get('query', '') 
 
@@ -133,19 +135,17 @@ def go():
 
 
 def main():
-
     if len(sys.argv) >= 3:
 
         database_path = sys.argv[1]
         model_path = sys.argv[2]
 
-        with app.app_context() as ctx:
-            # Load data from Messages Database
-            engine = create_engine(f'sqlite:///{database_path}')
-            df = pd.read_sql_table('database_messages', engine)
+        # Load data from Messages Database
+        engine = create_engine(f'sqlite:///{database_path}')
+        globals()['df'] = pd.read_sql_table('database_messages', engine)
 
-            # load model
-            model = joblib.load(f"{model_path}")
+        # load model
+        globals()['model'] = joblib.load(f"{model_path}")
 
             # Run application on port 3001
         app.run(host='0.0.0.0', port=3001, debug=True)
