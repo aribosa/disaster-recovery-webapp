@@ -15,6 +15,8 @@ Args:
 """
 
 # NLP libraries
+import warnings
+
 import nltk
 nltk.download('punkt')
 nltk.download('punkt')
@@ -197,6 +199,8 @@ def save_model(model: Pipeline, model_filepath):
 
 
 def main():
+    warnings.filterwarnings('ignore')
+
     if not len(sys.argv) == 3:
         print('No model and model file name provided, using defaults')
 
@@ -217,10 +221,10 @@ def main():
 
     print('Training model...')
     parameters = {
-        'classification__estimator__n_estimators': [10, 15, 25, 50, 100],
-        'classification__estimator__learning_rate': [0.1, 0.3, 0.5, 0.7]
+        'classification__estimator__n_estimators': [10,], # [10, 15, 25, 50, 100],
+        'classification__estimator__learning_rate':  [0.3] #[0.1, 0.3, 0.5, 0.7]
     }
-    model_cv = GridSearchCV(model, parameters, scoring='f1_weighted', verbose=10, error_score='raise')
+    model_cv = GridSearchCV(model, parameters, scoring='f1_weighted', verbose=10, error_score='raise', cv=2)
     model_cv.fit(X_train, Y_train)
 
     print('Evaluating model...')
